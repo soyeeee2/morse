@@ -90,17 +90,18 @@ def send_data():
 
 
 def morse2text(morse_code):
-    words = morse_code.split('s')  # 단어 단위로 나누기
+    words = morse_code.split('m')  # 단어 단위로 나누기
     decoded_text = ''
     for word in words:
-        letters = word.split('m')  # 단어 내에서 문자 단위로 나누기
+        letters = word.split('s')  # 단어 내에서 문자 단위로 나누기
         for letter in letters:
             if letter in morse_to_english:  # 알파벳 처리
                 decoded_text += morse_to_english[letter]
             elif letter in morse_to_number:  # 숫자 처리
                 decoded_text += morse_to_number[letter]
         decoded_text += ' '  # 단어 간 공백 추가
-    return decoded_text.strip()
+    return decoded_text
+
 
 def receive_data():
     fs = 48000
@@ -152,11 +153,10 @@ def receive_data():
     p.terminate()
     
     # 🔹 순차적으로 변환해야 replace가 정상적으로 동작함
-    morse = raw_morse.replace('...', '-')
-    morse = morse.replace('       ', 's')
-    morse = morse.replace('   ', 'm')
-    # morse = morse.replace('m', '')
-    # morse = morse.replace('s', ' ')
+    morse = raw_morse.replace('       ', 'm')  # 단어 사이 공백 변환
+    morse = morse.replace('   ', 's')  # 문자 사이 공백 먼저 변환
+    morse = morse.replace('...', '-')  # 연속된 점 세 개는 '-'
+    morse = morse.replace(' ', '')  # 나머지 불필요한 공백 제거
 
     print('Morse Code : ', morse)
     print('Text : ', morse2text(morse))
