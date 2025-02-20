@@ -10,13 +10,17 @@ import reedsolo
 channels = 1
 UNIT = 0.1
 SAMPLERATE = 48000
-chunk_size = 4800
 padding = 10
-DATA_LEN = 24
-RSC_LEN = 8
 SHORTMAX = 2**(16-1)-1
 PADDING_BYTE = b'\x00'  # Padding for block alignment
 
+
+DATA_LEN = 12  # 데이터 블록 길이
+RSC_LEN = 4  # Reed-Solomon 오류 정정 길이
+BLOCK_SIZE = DATA_LEN + RSC_LEN  # 16바이트 (32 HEX)
+UNIT = 0.1  # 1유닛(0.1초)
+SAMPLERATE = 48000
+chunk_size = 2 # 32비트형식(4바이트 * 2)
 
 
 rules = {
@@ -24,7 +28,7 @@ rules = {
     '6': 1536, '7': 1664, '8': 1792, '9': 1920, 'A': 2048, 'B': 2176, 'C': 2304, 
     'D': 2432, 'E': 2560, 'F': 2688, 'END': 2944
 }
-het_to_MFSK = {value: key for key, value in rules.items()}
+hex_to_MFSK = {value: key for key, value in rules.items()}
 
 def text_to_audio(user_input):
     """ Encode Unicode text to MFSK audio with Reed-Solomon error correction. """
@@ -41,7 +45,7 @@ def text_to_audio(user_input):
         audio.append(SHORTMAX * math.sin(2 * math.pi * rules['START'] * i / SAMPLERATE))
 
     # Step 3: Reed-Solomon Encoding with Padding
-    client_rsc = reedsolo.RSCodec(RSC_LEN)
+    client_rsc = reedsolo.RSCodec(RSC_LEN, nsize=16)
 
     for k in range(0, len(byte_hex), DATA_LEN):
         data = byte_hex[k:k+DATA_LEN]
@@ -82,53 +86,187 @@ def audio_to_file(audio_data, filename, samplerate=48000):
         wf.setframerate(samplerate)  # 샘플링 레이트 설정
         wf.writeframes(audio_data.tobytes())  # NumPy 데이터를 바이트로 변환 후 저장
 
+# def file_to_audio(filename='200802013.wav'):
+#     """ MFSK WAV 파일에서 START/END 신호를 감지하고 데이터를 복원 """
+#     client_rsc = reedsolo.RSCodec(RSC_LEN)  # Reed-Solomon 복원기
+#     received_hex = ""  # HEX 데이터 저장
+#     final_decoded_bytes = b""  # 최종 UTF-8 복원 바이트 데이터
 
+#     with wave.open(filename, 'rb') as w:
+#         sample_width = w.getsampwidth()  # 샘플 크기 확인
+#         bit_depth = sample_width * 8  # 바이트 → 비트 변환
 
+#         print(f"🔍 Detected Sample Width: {sample_width} bytes ({bit_depth}-bit WAV file)")
+#         framerate = w.getframerate()
+#         frames = w.getnframes()
+
+#         # START/END 감지용 변수
+#         start_detected = 0  
+#         end_detected = 0  
+#         recording = False  # 데이터 수집 여부
+
+#         for i in range(0, frames, chunk_size):
+#             frame = w.readframes(chunk_size)
+#             if len(frame) < chunk_size:  
+#                 break  # 파일 끝 도달
+
+#             # 64비트 PCM 데이터를 16비트 정수 배열로 변환
+#             audio = np.frombuffer(frame, dtype=np.int16)
+
+#             # FFT 변환 수행
+#             freq = scipy.fftpack.fftfreq(len(audio), d=1/SAMPLERATE)
+#             fourier = scipy.fftpack.fft(audio)
+#             top_freq = freq[np.argmax(abs(fourier))]  # 가장 강한 주파수
+
+#             # 감지된 주파수를 MFSK 주파수로 매핑
+#             detected_char = next((k for k, v in rules.items() if v - padding <= top_freq <= v + padding), '')
+
+#             # START 신호 감지 (2유닛 연속)
+#             if detected_char == "START":
+#                 start_detected += 1
+#                 if start_detected == 2:
+#                     print("\n🔹 START 신호 감지됨 - 데이터 수집 시작")
+#                     recording = True
+#                     received_hex = ""  # 데이터 초기화
+#                     continue
+#             else:
+#                 start_detected = 0  # 중간에 끊기면 초기화
+
+#             # END 신호 감지 (2유닛 연속)
+#             if detected_char == "END":
+#                 end_detected += 1
+#                 if end_detected == 2:
+#                     print("\n✅ END 신호 감지됨 - 데이터 수집 종료")
+#                     recording = False
+#                     break
+#             else:
+#                 end_detected = 0  # 중간에 끊기면 초기화
+
+#             # 데이터 수집 중이라면 HEX 값 저장
+#             if recording and detected_char and detected_char not in ["START", "END"]:
+#                 received_hex += detected_char
+#                 print(detected_char, end='', flush=True)  # 실시간 출력
+
+#     print(f"\n🔍 수집된 HEX 데이터: {received_hex}")
+
+#     # ✅ Reed-Solomon 디코딩
+#     for i in range(0, len(received_hex), BLOCK_SIZE * 2):
+#         block_hex = received_hex[i:i + (BLOCK_SIZE * 2)]
+#         block_bytes = bytes.fromhex(block_hex)
+
+#         try:
+#             decoded_block = client_rsc.decode(block_bytes)  # Reed-Solomon 복원
+
+#             # 튜플 반환 시 첫 번째 요소 사용
+#             original_data = decoded_block if not isinstance(decoded_block, tuple) else decoded_block[0]
+
+#             # 마지막 RSC_LEN(4바이트) 제거
+#             original_data = original_data[:-RSC_LEN]
+#             final_decoded_bytes += original_data
+#         except reedsolo.ReedSolomonError:
+#             print(f"❌ Reed-Solomon 복원 실패: {block_hex}")
+#             continue
+
+#     # ✅ UTF-8 변환
+#     try:
+#         decoded_text = final_decoded_bytes.decode("utf-8")
+#         print(f"\n✅ 최종 복원된 텍스트: {decoded_text}")
+#         return decoded_text
+#     except UnicodeDecodeError:
+#         print("❌ UTF-8 디코딩 실패: 데이터 손상 가능")
+#         return None
 
 def file_to_audio(filename='200802013.wav'):
-    """ Decode MFSK from 64-bit audio and recover Unicode text using Reed-Solomon """
-    DATA_LEN = 12  # 데이터 12개 (6바이트)
-    RSC_LEN = 4  # 오류 정정 4개 (2바이트)
-    BLOCK_SIZE = 8  # 총 8바이트 (16개 HEX 문자열)
+    """ 32비트 PCM WAV 파일에서 8바이트(64비트) 단위로 데이터를 읽고 MFSK 복원 """
+    client_rsc = reedsolo.RSCodec(RSC_LEN)  # Reed-Solomon 복원기
+    received_hex = ""  # HEX 데이터 저장
+    final_decoded_bytes = b""  # 최종 UTF-8 복원 바이트 데이터
 
-    client_rsc = reedsolo.RSCodec(RSC_LEN)
-    received_hex = ""  # 전체 HEX 데이터 저장
-
-    # Read 64-bit WAV file
     with wave.open(filename, 'rb') as w:
+        sample_width = w.getsampwidth()  # 샘플 크기 확인
+        bit_depth = sample_width * 8  # 바이트 → 비트 변환
+
+        print(f"🔍 Detected Sample Width: {sample_width} bytes ({bit_depth}-bit WAV file)")
+
         framerate = w.getframerate()
         frames = w.getnframes()
 
-        for i in range(frames):  # 1 프레임(샘플)씩 읽음 (8바이트)
-            frame = w.readframes(8)  # 8바이트(64비트) 읽기
+        start_detected = 0  
+        end_detected = 0  
+        recording = False  
 
-            # 🔹 8바이트(64비트)를 16개의 HEX 문자열로 변환
-            hex_value = frame.hex().upper()  # 직접 HEX 변환 (8바이트 → 16개 HEX)
-            received_hex += hex_value  # 전체 HEX 문자열 저장
+        for i in range(0, frames, chunk_size):
+            frame = w.readframes(chunk_size)  # ✅ 8바이트(2개의 32비트 샘플)씩 읽기
+            if len(frame) < chunk_size * 4:  
+                break  # 파일 끝 도달
 
-    # Reed-Solomon 디코딩 후 원본 데이터 복원
-    final_decoded_hex = ""  # 최종 HEX 데이터 저장
+            # ✅ 32비트(4바이트) 샘플 2개를 합쳐서 64비트로 해석
+            audio = np.frombuffer(frame, dtype=np.int16)
 
-    for i in range(0, len(received_hex), BLOCK_SIZE * 2):  # 8바이트(16 HEX) 블록 단위로 처리
-        block_hex = received_hex[i:i + (BLOCK_SIZE * 2)]  # 한 블록 추출
-        block_bytes = bytes.fromhex(block_hex)  # HEX → 바이트 변환
 
-        # 🔹 블록 크기가 부족해도 그대로 진행
-        if len(block_bytes) > RSC_LEN:  # RSC_LEN(2바이트)보다 큰 경우만 처리
-            try:
-                decoded_block = client_rsc.decode(block_bytes)  # Reed-Solomon 복원
-                original_data = decoded_block[:-RSC_LEN]  # 마지막 2바이트 제거
+            print(f"🎵 Raw Audio Data: {audio[:10]}")
 
-                final_decoded_hex += original_data.hex()  # HEX 문자열로 변환 후 저장
+            # FFT 수행
+            freq = scipy.fftpack.fftfreq(len(audio), d=1/SAMPLERATE)
+            fourier = scipy.fftpack.fft(audio)
+            top_freq = freq[np.argmax(abs(fourier))]  # 가장 강한 주파수
 
-            except reedsolo.ReedSolomonError:
-                print(f"❌ 오류 정정 실패: {block_hex}")  # 디버깅용 출력
-                continue  # 오류 정정 실패한 블록은 건너뜀
+            # 감지된 주파수를 MFSK 주파수로 매핑
+            detected_char = next((k for k, v in rules.items() if v - padding <= top_freq <= v + padding), '')
 
-    # UTF-8 변환
+            # ✅ 실시간 출력
+            print(f"📡 [{i // chunk_size}] Detected Frequency: {top_freq:.2f} Hz → {detected_char}")
+
+            # START 신호 감지 (2유닛 연속)
+            if detected_char == "START":
+                start_detected += 1
+                if start_detected == 2:
+                    print("\n🔹 START 신호 감지됨 - 데이터 수집 시작")
+                    recording = True
+                    received_hex = ""  # 데이터 초기화
+                    continue
+            else:
+                start_detected = 0  # 중간에 끊기면 초기화
+
+            # END 신호 감지 (2유닛 연속)
+            if detected_char == "END":
+                end_detected += 1
+                if end_detected == 2:
+                    print("\n✅ END 신호 감지됨 - 데이터 수집 종료")
+                    recording = False
+                    break
+            else:
+                end_detected = 0  # 중간에 끊기면 초기화
+
+            # 데이터 수집 중이라면 HEX 값 저장
+            if recording and detected_char and detected_char not in ["START", "END"]:
+                received_hex += detected_char
+                print(detected_char, end='', flush=True)  # 실시간 출력
+
+    print(f"\n🔍 수집된 HEX 데이터: {received_hex}")
+
+    # ✅ Reed-Solomon 디코딩
+    for i in range(0, len(received_hex), BLOCK_SIZE * 2):
+        block_hex = received_hex[i:i + (BLOCK_SIZE * 2)]
+        block_bytes = bytes.fromhex(block_hex)
+
+        try:
+            decoded_block = client_rsc.decode(block_bytes)  # Reed-Solomon 복원
+
+            # 튜플 반환 시 첫 번째 요소 사용
+            original_data = decoded_block if not isinstance(decoded_block, tuple) else decoded_block[0]
+
+            # 마지막 RSC_LEN(4바이트) 제거
+            original_data = original_data[:-RSC_LEN]
+            final_decoded_bytes += original_data
+        except reedsolo.ReedSolomonError:
+            print(f"❌ Reed-Solomon 복원 실패: {block_hex}")
+            continue
+
+    # ✅ UTF-8 변환
     try:
-        decoded_text = bytes.fromhex(final_decoded_hex).decode("utf-8")
-        print(f"✅ 최종 복원된 텍스트: {decoded_text}")
+        decoded_text = final_decoded_bytes.decode("utf-8")
+        print(f"\n✅ 최종 복원된 텍스트: {decoded_text}")
         return decoded_text
     except UnicodeDecodeError:
         print("❌ UTF-8 디코딩 실패: 데이터 손상 가능")
